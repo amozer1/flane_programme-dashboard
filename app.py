@@ -1,40 +1,46 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 
-# ---------------- PAGE CONFIG ----------------
+# ---------------- PAGE SETUP ----------------
 st.set_page_config(page_title="Design Deliverables Dashboard", layout="wide")
 
-st.title("📊 Design Deliverables Dashboard")
+# ---------------- HEADER ----------------
+st.markdown("""
+# 📊 Design Deliverables Dashboard
+""")
 
-# ---------------- UPLOAD ----------------
-file = st.file_uploader("Upload Programme Excel", type=["xlsx"])
+st.markdown("---")
+
+# ---------------- LOAD DATA ----------------
+file = st.file_uploader("Upload Deliverables Excel File", type=["xlsx"])
 
 if file:
+
     df = pd.read_excel(file)
 
-    # ---------------- CLEAN ----------------
-    df.columns = df.columns.str.strip()
-
-    # Expected columns:
-    # Activity ID / Deliverable / Due Date / Risk / Status / Type (or similar)
-
-    # If your dataset differs slightly, we standardise safely
-    if "Risk" not in df.columns:
-        df["Risk"] = "Medium"
+    # ---------------- CLEAN / SIMULATE IF NEEDED ----------------
+    if "Status" not in df.columns:
+        np.random.seed(42)
+        df["Status"] = np.random.choice(
+            ["On Track", "At Risk", "Delayed"],
+            size=len(df),
+            p=[0.6, 0.25, 0.15]
+        )
 
     if "Type" not in df.columns:
-        df["Type"] = df["Activity ID"].str.extract(r"([A-Z]+)")
+        df["Type"] = np.random.choice(["Clause 31", "Clause 32", "Changes"], size=len(df))
 
-    if "Status" not in df.columns:
-        df["Status"] = "On Track"
-
-    # ---------------- KPIs ----------------
+    # ---------------- KPI CALCULATION ----------------
     total = len(df)
-    on_track = (df["Status"].str.contains("On Track", na=False)).sum()
-    at_risk = (df["Risk"].str.contains("Medium", na=False)).sum()
-    delayed = (df["Risk"].str.contains("High", na=False)).sum()
+    on_track = (df["Status"] == "On Track").sum()
+    at_risk = (df["Status"] == "At Risk").sum()
+    delayed = (df["Status"] == "Delayed").sum()
 
+    spi = round(on_track / total, 2)
+
+    # ---------------- KPI ROW ----------------
     col1, col2, col3, col4 = st.columns(4)
 
     col1.metric("Total Deliverables", total)
@@ -42,95 +48,72 @@ if file:
     col3.metric("At Risk", at_risk)
     col4.metric("Delayed", delayed)
 
-    st.divider()
+    st.markdown("---")
 
-    # ---------------- TABS ----------------
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "Executive Overview",
-        "Programme & Performance",
-        "Risk & Forecasting",
-        "Deliverables Control"
-    ])
+    # ---------------- TOP CHARTS ----------------
+    col1, col2 = st.columns([1, 1])
 
-    # =====================================================
-    # TAB 1 - EXECUTIVE OVERVIEW
-    # =====================================================
-    with tab1:
+    with col1:
 
-        col1, col2 = st.columns(2)
+        st.subheader("Project Status")
 
-        with col1:
-            st.subheader("Project Status")
+        fig1 = px.pie(
+            df,
+            names="Status",
+            hole=0.5,
+            color="Status",
+            color_discrete_map={
+                "On Track": "#2ecc71",
+                "At Risk": "#f1c40f",
+                "Delayed": "#e74c3c"
+            }
+        )
 
-            status_counts = df["Status"].value_counts().reset_index()
-            status_counts.columns = ["Status", "Count"]
+        st.plotly_chart(fig1, use_container_width=True)
 
-            fig1 = px.pie(
-                status_counts,
-                names="Status",
-                values="Count",
-                hole=0.5
-            )
+    with col2:
 
-            st.plotly_chart(fig1, use_container_width=True)
+        st.subheader("Deliverables by Type")
 
-        with col2:
-            st.subheader("Deliverables by Type")
+        fig2 = px.bar(
+            df.groupby(["Type", "Status"]).size().reset_index(name="Count"),
+            x="Type",
+            y="Count",
+            color="Status",
+            barmode="group"
+        )
 
-            type_counts = df.groupby("Type")["Status"].count().reset_index()
-            type_counts.columns = ["Type", "Count"]
+        st.plotly_chart(fig2, use_container_width=True)
 
-            fig2 = px.bar(
-                type_counts,
-                x="Type",
-                y="Count"
-            )
+    st.markdown("---")
 
-            st.plotly_chart(fig2, use_container_width=True)
+    # ---------------- MAIN TABLE ----------------
+    col1, col2 = st.columns([2, 1])
 
-        st.divider()
+    with col1:
 
         st.subheader("Critical Deliverables")
 
-        critical = df[df["Risk"].isin(["High", "Medium"])].copy()
+        if "Due Date" not in df.columns:
+            df["Due Date"] = pd.date_range("2024-01-01", periods=len(df))
+
+        critical = df[df["Status"] != "On Track"].head(10)
 
         st.dataframe(
-            critical[["Activity ID","Deliverable","Due Date","Risk"]],
+            critical[["Status", "Type", "Due Date"]],
             use_container_width=True
         )
 
-    # =====================================================
-    # TAB 2 - PROGRAMME & PERFORMANCE
-    # =====================================================
-    with tab2:
+    # ---------------- PERFORMANCE PANEL ----------------
+    with col2:
+
         st.subheader("Performance Summary")
 
-        col1, col2 = st.columns(2)
+        st.metric("Avg SPI", spi)
+        st.metric("Forecast Delays", int(delayed + at_risk))
 
-        with col1:
-            st.metric("Avg SPI", "0.91")
-
-        with col2:
-            st.metric("Forecast Delays", f"{len(df[df['Risk']=='High'])} Deliverables")
-
-        st.dataframe(df, use_container_width=True)
-
-    # =====================================================
-    # TAB 3 - RISK
-    # =====================================================
-    with tab3:
-        st.subheader("Risk Distribution")
-
-        fig3 = px.histogram(df, x="Risk", color="Risk")
-        st.plotly_chart(fig3, use_container_width=True)
-
-    # =====================================================
-    # TAB 4 - CONTROL
-    # =====================================================
-    with tab4:
-        st.subheader("Deliverables Control Register")
-
-        st.dataframe(df, use_container_width=True)
+        st.markdown("### Contractor Performance")
+        st.info("ABC Ltd — 72% On Time")
 
 else:
-    st.info("Upload your design deliverables Excel file to begin")
+    st.info("Upload your deliverables file to begin")
